@@ -109,9 +109,6 @@ handle_enrol_message (SnraClient * client, GstStructure * s)
   cur_time = (GstClockTime) (tmp);
 
   if (snra_json_structure_get_double (s, "volume-level", &new_vol)) {
-    if (client->player == NULL)
-      construct_player (client);
-
     if (client->player) {
       //g_print ("New volume %g\n", new_vol);
       g_object_set (G_OBJECT (client->player), "volume", new_vol,
@@ -184,6 +181,11 @@ static void
 construct_player (SnraClient * client)
 {
   GstBus *bus;
+  GSource *bus_source;
+  guint flags;
+
+  client->soup = soup_session_async_new_with_options (SOUP_SESSION_ASYNC_CONTEXT, client->context, NULL);
+  g_assert (client->soup);
 
   client->player = gst_element_factory_make ("playbin2", NULL);
 
@@ -191,8 +193,20 @@ construct_player (SnraClient * client)
     g_warning ("Failed to construct playbin");
     return;
   }
+
+  g_object_get (client->player, "flags", &flags, NULL);
+  /* Disable subtitles for now */
+  flags &= ~0x00000004;
+  g_object_set (client->player, "flags", flags, NULL);
+
   bus = gst_element_get_bus (GST_ELEMENT (client->player));
-  gst_bus_add_signal_watch (bus);
+
+  bus_source = gst_bus_create_watch (bus);
+  g_source_set_callback (bus_source, (GSourceFunc) gst_bus_async_signal_func,
+      NULL, NULL);
+  g_source_attach (bus_source, client->context);
+  g_source_unref (bus_source);
+
   g_signal_connect (bus, "message::eos", (GCallback) (on_eos_msg), client);
   g_signal_connect (bus, "message::error", (GCallback) (on_error_msg), client);
   gst_object_unref (bus);
@@ -226,7 +240,6 @@ handle_set_media_message (SnraClient * client, GstStructure * s)
   base_time = (GstClockTime) (tmp);
 
   if (client->player == NULL) {
-    construct_player (client);
     if (client->player == NULL)
       return;
   } else {
@@ -290,9 +303,6 @@ handle_set_volume_message (SnraClient * client, GstStructure * s)
 
   if (!snra_json_structure_get_double (s, "level", &new_vol))
     return;
-
-  if (client->player == NULL)
-    construct_player (client);
 
   if (client->player) {
     // g_print ("New volume %g\n", new_vol);
@@ -403,7 +413,6 @@ connect_to_server (SnraClient * client, const gchar * server, int port)
 static void
 snra_client_init (SnraClient * client)
 {
-  client->soup = soup_session_async_new ();
   client->server_port = 5457;
   client->state = GST_STATE_NULL;
 }
@@ -415,8 +424,6 @@ snra_client_constructed (GObject * object)
 
   if (G_OBJECT_CLASS (snra_client_parent_class)->constructed != NULL)
     G_OBJECT_CLASS (snra_client_parent_class)->constructed (object);
-
-  try_reconnect (client);
 }
 
 static void
@@ -454,6 +461,8 @@ snra_client_finalize (GObject * object)
     gst_object_unref (bus);
     gst_object_unref (client->player);
   }
+  if (client->context)
+    g_main_context_unref (client->context);
 
   g_free (client->server_host);
   g_free (client->connected_server);
@@ -530,10 +539,14 @@ snra_client_get_property (GObject * object, guint prop_id,
 }
 
 SnraClient *
-snra_client_new (const char *server_host)
+snra_client_new (GMainContext * context, const char *server_host)
 {
   SnraClient *client = g_object_new (SNRA_TYPE_CLIENT,
       "server-host", server_host, NULL);
+  client->context = context ? g_main_context_ref (context) : NULL;
+  construct_player (client);
+  try_reconnect (client);
+
   return client;
 }
 

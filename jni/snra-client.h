@@ -29,6 +29,8 @@ struct _SnraClient
   SoupSession *soup;
   JsonParser *json;
 
+  GMainContext * context;
+
   GstElement *player;
 
   guint timeout;
@@ -45,7 +47,7 @@ struct _SnraClientClass
 };
 
 GType snra_client_get_type(void);
-SnraClient *snra_client_new(const gchar *server);
+SnraClient *snra_client_new(GMainContext * context, const gchar *server);
 
 G_END_DECLS
 #endif
