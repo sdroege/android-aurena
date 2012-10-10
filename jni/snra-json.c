@@ -24,7 +24,7 @@
 #include <gst/gst.h>
 #include <json-glib/json-glib.h>
 
-#include <src/snra-json.h>
+#include "snra-json.h"
 
 #ifndef G_VALUE_INIT
 #define G_VALUE_INIT {{0,}, {0,}}

@@ -5,14 +5,8 @@
 #include <gst/net/gstnet.h>
 #include <libsoup/soup.h>
 #include <json-glib/json-glib.h>
-#include <avahi-client/client.h>
-#include <avahi-client/lookup.h>
 
-#include <avahi-common/malloc.h>
-#include <avahi-common/error.h>
-#include <avahi-glib/glib-watch.h>
-
-#include <src/snra-types.h>
+#include "snra-types.h"
 
 G_BEGIN_DECLS
 
@@ -43,10 +37,6 @@ struct _SnraClient
   gboolean was_connected;
   gchar *connected_server;
   gint connected_port;
-
-  AvahiGLibPoll *glib_poll;
-  AvahiClient *avahi_client;
-  AvahiServiceBrowser *avahi_sb;
 };
 
 struct _SnraClientClass

@@ -33,15 +33,7 @@
 #include <stdlib.h>
 #include <glib.h>
 
-#if !GLIB_CHECK_VERSION(2,22,0)
-/* GResolver not available */
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netdb.h>
-#endif
-
-#include <src/snra-json.h>
-
+#include "snra-json.h"
 #include "snra-client.h"
 
 #define DISABLED_STATE GST_STATE_PAUSED
@@ -63,7 +55,6 @@ static void snra_client_get_property (GObject * object, guint prop_id,
 static void snra_client_finalize (GObject * object);
 static void snra_client_dispose (GObject * object);
 
-static void search_for_server (SnraClient * client);
 static void connect_to_server (SnraClient * client, const gchar * server,
     int port);
 static void construct_player (SnraClient * client);
@@ -73,10 +64,7 @@ try_reconnect (SnraClient * client)
 {
   client->timeout = 0;
 
-  if (client->server_host)
-    connect_to_server (client, client->server_host, client->server_port);
-  else
-    search_for_server (client);
+  connect_to_server (client, client->server_host, client->server_port);
 
   return FALSE;
 }
@@ -134,7 +122,6 @@ handle_enrol_message (SnraClient * client, GstStructure * s)
   snra_json_structure_get_boolean (s, "enabled", &client->enabled);
   snra_json_structure_get_boolean (s, "paused", &client->paused);
 
-#if GLIB_CHECK_VERSION(2,22,0)
   {
     GResolver *resolver = g_resolver_get_default ();
     GList *names;
@@ -151,21 +138,6 @@ handle_enrol_message (SnraClient * client, GstStructure * s)
     }
     g_object_unref (resolver);
   }
-#else
-  {
-    struct addrinfo *names = NULL;
-    if (getaddrinfo (client->connected_server, NULL, NULL, &names))
-      return;
-    if (names) {
-      char hbuf[NI_MAXHOST];
-      if (getnameinfo (names->ai_addr, names->ai_addrlen,
-              hbuf, sizeof (hbuf), NULL, 0, NI_NUMERICHOST) == 0) {
-        server_ip_str = g_strdup (hbuf);
-      }
-      freeaddrinfo (names);
-    }
-  }
-#endif
   if (server_ip_str) {
     g_print ("Creating net clock at %s:%d time %" GST_TIME_FORMAT "\n",
         server_ip_str, clock_port, GST_TIME_ARGS (cur_time));
@@ -213,10 +185,7 @@ construct_player (SnraClient * client)
 {
   GstBus *bus;
 
-  if (GST_CHECK_VERSION (0, 11, 1))
-    client->player = gst_element_factory_make ("playbin", NULL);
-  else
-    client->player = gst_element_factory_make ("playbin2", NULL);
+  client->player = gst_element_factory_make ("playbin2", NULL);
 
   if (client->player == NULL) {
     g_warning ("Failed to construct playbin");
@@ -359,12 +328,6 @@ handle_received_chunk (G_GNUC_UNUSED SoupMessage * msg, SoupBuffer * chunk,
 
     client->was_connected = TRUE;
   }
-  /* Successful server connection, stop avahi discovery */
-  if (client->avahi_client) {
-    avahi_client_free (client->avahi_client);
-    client->avahi_sb = NULL;
-    client->avahi_client = NULL;
-  }
 
   if (client->json == NULL)
     client->json = json_parser_new ();
@@ -479,13 +442,6 @@ snra_client_finalize (GObject * object)
 {
   SnraClient *client = (SnraClient *) (object);
 
-  if (client->avahi_sb)
-    avahi_service_browser_free (client->avahi_sb);
-  if (client->avahi_client)
-    avahi_client_free (client->avahi_client);
-  if (client->glib_poll)
-    avahi_glib_poll_free (client->glib_poll);
-
   if (client->net_clock)
     gst_object_unref (client->net_clock);
   if (client->soup)
@@ -581,110 +537,3 @@ snra_client_new (const char *server_host)
   return client;
 }
 
-static void
-avahi_resolve_callback (AvahiServiceResolver * r,
-    AVAHI_GCC_UNUSED AvahiIfIndex interface,
-    AVAHI_GCC_UNUSED AvahiProtocol protocol, AvahiResolverEvent event,
-    AVAHI_GCC_UNUSED const char *name, AVAHI_GCC_UNUSED const char *type,
-    AVAHI_GCC_UNUSED const char *domain, const char *host_name,
-    AVAHI_GCC_UNUSED const AvahiAddress * address, uint16_t port,
-    AVAHI_GCC_UNUSED AvahiStringList * txt,
-    AVAHI_GCC_UNUSED AvahiLookupResultFlags flags,
-    AVAHI_GCC_UNUSED void *userdata)
-{
-  SnraClient *client = userdata;
-
-  switch (event) {
-    case AVAHI_RESOLVER_FAILURE:
-      break;
-
-    case AVAHI_RESOLVER_FOUND:{
-      if (!client->connecting) {
-        /* FIXME: Build a list of servers and try each one in turn? */
-        connect_to_server (client, host_name, port);
-      }
-    }
-  }
-
-  avahi_service_resolver_free (r);
-}
-
-static void
-browse_callback (AVAHI_GCC_UNUSED AvahiServiceBrowser * b,
-    AvahiIfIndex interface, AvahiProtocol protocol,
-    AvahiBrowserEvent event,
-    const char *name, const char *type, const char *domain,
-    AVAHI_GCC_UNUSED AvahiLookupResultFlags flags, void *userdata)
-{
-  SnraClient *client = userdata;
-
-  switch (event) {
-    case AVAHI_BROWSER_FAILURE:
-      /* Respawn browser on a timer? */
-      avahi_service_browser_free (client->avahi_sb);
-      client->timeout = g_timeout_add_seconds (1,
-          (GSourceFunc) try_reconnect, client);
-      return;
-
-    case AVAHI_BROWSER_NEW:{
-      avahi_service_resolver_new (client->avahi_client, interface,
-          protocol, name, type, domain, AVAHI_PROTO_UNSPEC, 0,
-          avahi_resolve_callback, client);
-      break;
-    }
-    case AVAHI_BROWSER_REMOVE:
-    case AVAHI_BROWSER_ALL_FOR_NOW:
-    case AVAHI_BROWSER_CACHE_EXHAUSTED:
-      break;
-  }
-}
-
-static void
-snra_avahi_client_callback (AvahiClient * s, AvahiClientState state,
-    SnraClient * client)
-{
-  switch (state) {
-    case AVAHI_CLIENT_S_RUNNING:{
-      if (client->avahi_sb == NULL) {
-        g_print ("Looking for new broadcast servers\n");
-        client->avahi_sb = avahi_service_browser_new (s, AVAHI_IF_UNSPEC,
-            AVAHI_PROTO_UNSPEC, "_aurena._tcp", NULL, 0, browse_callback,
-            client);
-        if (client->avahi_sb == NULL) {
-          fprintf (stderr, "Failed to create service browser: %s\n",
-              avahi_strerror (avahi_client_errno (client->avahi_client)));
-        }
-      }
-      break;
-    }
-    default:
-      break;
-  }
-}
-
-static void
-search_for_server (SnraClient * client)
-{
-  const AvahiPoll *poll_api;
-  int error;
-
-  if (client->glib_poll == NULL) {
-    client->glib_poll = avahi_glib_poll_new (NULL, G_PRIORITY_DEFAULT);
-    if (client->glib_poll == NULL)
-      return;
-  }
-
-  poll_api = avahi_glib_poll_get (client->glib_poll);
-
-  if (client->avahi_client == NULL) {
-    client->avahi_client =
-        avahi_client_new (poll_api, AVAHI_CLIENT_NO_FAIL,
-        (AvahiClientCallback) snra_avahi_client_callback, client, &error);
-    if (client->avahi_client == NULL) {
-      fprintf (stderr, "Failed to connect to Avahi: %s",
-          avahi_strerror (error));
-      return;
-    }
-  }
-
-}
