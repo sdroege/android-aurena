@@ -11,6 +11,8 @@
 GST_DEBUG_CATEGORY_STATIC (debug_category);
 #define GST_CAT_DEFAULT debug_category
 
+#define SERVER_ADDRESS "192.168.0.20:5457"
+
 /*
  * These macros provide a way to store the native pointer to CustomData, which might be 32 or 64 bits, into
  * a jlong, which is always 64 bits, without warnings.
@@ -191,7 +193,7 @@ setup_client (CustomData * data)
   if (data->client != NULL)
     return;
 
-  data->client = snra_client_new (data->context, "192.168.0.20:5457");
+  data->client = snra_client_new (data->context, SERVER_ADDRESS);
 
   if (data->native_window) {
     GST_DEBUG
@@ -257,7 +259,7 @@ app_function (void *userdata)
 /*
  * Java Bindings
  */
-void
+static void
 gst_native_init (JNIEnv * env, jobject thiz)
 {
   CustomData *data = g_new0 (CustomData, 1);
@@ -269,7 +271,7 @@ gst_native_init (JNIEnv * env, jobject thiz)
   pthread_create (&gst_app_thread, NULL, &app_function, data);
 }
 
-void
+static void
 gst_native_finalize (JNIEnv * env, jobject thiz)
 {
   CustomData *data = GET_CUSTOM_DATA (env, thiz, custom_data_field_id);
@@ -287,7 +289,7 @@ gst_native_finalize (JNIEnv * env, jobject thiz)
   GST_DEBUG ("Done finalizing");
 }
 
-void
+static void
 gst_native_play (JNIEnv * env, jobject thiz)
 {
   CustomData *data = GET_CUSTOM_DATA (env, thiz, custom_data_field_id);
@@ -303,7 +305,7 @@ gst_native_play (JNIEnv * env, jobject thiz)
   setup_client (data);
 }
 
-void
+static void
 gst_native_pause (JNIEnv * env, jobject thiz)
 {
   CustomData *data = GET_CUSTOM_DATA (env, thiz, custom_data_field_id);
@@ -319,7 +321,7 @@ gst_native_pause (JNIEnv * env, jobject thiz)
   destroy_client (data);
 }
 
-jboolean
+static jboolean
 gst_class_init (JNIEnv * env, jclass klass)
 {
   custom_data_field_id =
@@ -353,7 +355,7 @@ gst_class_init (JNIEnv * env, jclass klass)
   return JNI_TRUE;
 }
 
-void
+static void
 gst_native_surface_init (JNIEnv * env, jobject thiz, jobject surface)
 {
   CustomData *data = GET_CUSTOM_DATA (env, thiz, custom_data_field_id);
@@ -380,7 +382,7 @@ gst_native_surface_init (JNIEnv * env, jobject thiz, jobject surface)
   check_initialization_complete (data);
 }
 
-void
+static void
 gst_native_surface_finalize (JNIEnv * env, jobject thiz)
 {
   CustomData *data = GET_CUSTOM_DATA (env, thiz, custom_data_field_id);
@@ -392,6 +394,8 @@ gst_native_surface_finalize (JNIEnv * env, jobject thiz)
   GST_DEBUG ("Releasing Native Window %p", data->native_window);
 
   if (data->client) {
+    if (data->client->player)
+      gst_x_overlay_set_window_handle (GST_X_OVERLAY (data->client->player), NULL);
     destroy_client (data);
   }
 
