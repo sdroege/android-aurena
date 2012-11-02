@@ -4,13 +4,14 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.TimeZone;
 
-import com.gst_sdk.GStreamer;
+import com.gstreamer.GStreamer;
 
 import android.app.Activity;
-import android.content.Intent;
+import android.content.Context;
 import android.util.Log;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.PowerManager;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
@@ -32,6 +33,7 @@ public class AndroidAurena extends Activity implements SurfaceHolder.Callback {
     private boolean is_playing_desired;
     private int position;
     private int duration;
+    private PowerManager.WakeLock wake_lock;
 
     /* Called when the activity is first created. */
     @Override
@@ -49,10 +51,15 @@ public class AndroidAurena extends Activity implements SurfaceHolder.Callback {
 
         setContentView(R.layout.main);
 
+        PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        wake_lock = pm.newWakeLock(PowerManager.FULL_WAKE_LOCK, "Android Aurena");
+        wake_lock.setReferenceCounted(false);
+
         ImageButton play = (ImageButton) this.findViewById(R.id.button_play);
         play.setOnClickListener(new OnClickListener() {
             public void onClick(View v) {
                 is_playing_desired = true;
+                wake_lock.acquire();
                 nativePlay();
             }
         });
@@ -61,6 +68,7 @@ public class AndroidAurena extends Activity implements SurfaceHolder.Callback {
         pause.setOnClickListener(new OnClickListener() {
             public void onClick(View v) {
                 is_playing_desired = false;
+                wake_lock.release();
                 nativePause();
             }
         });
@@ -68,14 +76,23 @@ public class AndroidAurena extends Activity implements SurfaceHolder.Callback {
         SurfaceView sv = (SurfaceView) this.findViewById(R.id.surface_video);
         SurfaceHolder sh = sv.getHolder();
         sh.addCallback(this);
-
-        is_playing_desired = false;
-
+	
+	if (savedInstanceState != null) {
+            is_playing_desired = savedInstanceState.getBoolean("playing");
+        } else {
+            is_playing_desired = false;
+        }
         nativeInit();
     }
-    
+
+    protected void onSaveInstanceState (Bundle outState) {
+        outState.putBoolean("playing", is_playing_desired);
+    }
+
     protected void onDestroy() {
         nativeFinalize();
+        if (wake_lock.isHeld())
+            wake_lock.release();
         super.onDestroy();
     }
 
@@ -90,10 +107,12 @@ public class AndroidAurena extends Activity implements SurfaceHolder.Callback {
     }
     
     /* Called from native code */
-    private void onGStreamerInitialized () {    	
+    private void onGStreamerInitialized () {
         if (is_playing_desired) {
+            wake_lock.acquire();
             nativePlay();
         } else {
+            wake_lock.release();
             nativePause();
         }
     }

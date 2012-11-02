@@ -395,7 +395,7 @@ gst_native_surface_finalize (JNIEnv * env, jobject thiz)
 
   if (data->client) {
     if (data->client->player)
-      gst_x_overlay_set_window_handle (GST_X_OVERLAY (data->client->player), NULL);
+      gst_x_overlay_set_window_handle (GST_X_OVERLAY (data->client->player), (guintptr) NULL);
     destroy_client (data);
   }
 
