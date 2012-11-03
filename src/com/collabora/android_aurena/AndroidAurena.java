@@ -30,7 +30,6 @@ public class AndroidAurena extends Activity implements SurfaceHolder.Callback {
     private native void nativeSurfaceFinalize();
     private long native_custom_data;
 
-    private boolean is_playing_desired;
     private int position;
     private int duration;
     private PowerManager.WakeLock wake_lock;
@@ -55,38 +54,13 @@ public class AndroidAurena extends Activity implements SurfaceHolder.Callback {
         wake_lock = pm.newWakeLock(PowerManager.FULL_WAKE_LOCK, "Android Aurena");
         wake_lock.setReferenceCounted(false);
 
-        ImageButton play = (ImageButton) this.findViewById(R.id.button_play);
-        play.setOnClickListener(new OnClickListener() {
-            public void onClick(View v) {
-                is_playing_desired = true;
-                wake_lock.acquire();
-                nativePlay();
-            }
-        });
-
-        ImageButton pause = (ImageButton) this.findViewById(R.id.button_stop);
-        pause.setOnClickListener(new OnClickListener() {
-            public void onClick(View v) {
-                is_playing_desired = false;
-                wake_lock.release();
-                nativePause();
-            }
-        });
-        
         SurfaceView sv = (SurfaceView) this.findViewById(R.id.surface_video);
         SurfaceHolder sh = sv.getHolder();
         sh.addCallback(this);
 	
-	if (savedInstanceState != null) {
-            is_playing_desired = savedInstanceState.getBoolean("playing");
-        } else {
-            is_playing_desired = false;
-        }
         nativeInit();
-    }
 
-    protected void onSaveInstanceState (Bundle outState) {
-        outState.putBoolean("playing", is_playing_desired);
+        wake_lock.acquire();
     }
 
     protected void onDestroy() {
@@ -108,13 +82,7 @@ public class AndroidAurena extends Activity implements SurfaceHolder.Callback {
     
     /* Called from native code */
     private void onGStreamerInitialized () {
-        if (is_playing_desired) {
-            wake_lock.acquire();
-            nativePlay();
-        } else {
-            wake_lock.release();
-            nativePause();
-        }
+        nativePlay();
     }
 
     /* The text widget acts as an slave for the seek bar, so it reflects what the seek bar shows, whether
